@@ -1,3 +1,5 @@
 datasets/
 .vscode/
 __pycache__/
+*.DS_Store
+.DS_store
