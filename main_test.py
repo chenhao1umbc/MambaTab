@@ -2,14 +2,25 @@ from main_test_lib import (
     read_data,
     create_dataloaders,
     test_result,
-    config,
     train_test_split,
-    DataLoader,
     train_model,
     train_ssl,
     MambaTab,
 )
+import torch
 
+config = {
+    "DATASET_NAME": "credit_approval",  # Please follow paper and use 'X' as dataset name, where X can be ='credit','dress', etc. As an example here X='credit_approval' is provided.
+    "SEED": 15,  # variations in machine configurations can affect distributions
+    "BATCH": 100,
+    "LR": 0.0001,
+    "EPOCH": 1000,
+    "REPRESENTATION_LAYER": 32,
+    "ssl_epochs": 100,
+    "ssl_corruption": 0.5,
+    "ssl": False,
+    "device": "cuda" if torch.cuda.is_available() else "cpu",
+}
 # Dataloading and split
 x_data, y_data = read_data(dataset_name=config["DATASET_NAME"])
 x_train, x_test, y_train, y_test = train_test_split(
@@ -61,5 +72,5 @@ if config["ssl"] == True:
 model = train_model(model, config, dataloader)
 
 # Get test set performance
-test_result(model, dataloader)
+test_result(model, dataloader, config)
 print("----------------Complete----------------")
