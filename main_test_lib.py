@@ -186,31 +186,31 @@ class Mamba_pt(nn.Module):
         A = -torch.exp(self.A_log.float())
 
         # Precompute all dA and dB for all timesteps
-        # dA: (B, L, d_inner, d_state)
-        dA = torch.exp(torch.einsum("bli,in->blin", dt, A))
-
-        # Corrected dB: (B, L, d_inner, d_state)
-        dB = torch.einsum("bli,bls->blis", dt, B_ssm)
-
-        # x_activated: (B, L, d_inner) -> (B, L, d_inner, 1)
-        x = x_activated.unsqueeze(-1)
-
-        # Initialize state tensor with an extra timestep dimension
-        # (B, d_inner, d_state, L+1)
-        state = torch.zeros(
-            B, self.d_inner, self.d_state, L + 1, device=hidden_states.device
+        ssm_state = torch.zeros(
+            B, self.d_inner, self.d_state, device=hidden_states.device
         )
-
-        # Vectorized recurrence using cumulative product
+        ys = []
         for i in range(L):
-            state[..., i + 1] = dA[:, i] * state[..., i] + dB[:, i] * x[:, i]
 
-        # Slice to get final states (B, d_inner, d_state, L)
-        state = state[..., 1:]
+            dt_i = dt[:, i, :]  # (B, d_inner)
+            B_i = B_ssm[:, i, :]  # (B, d_state)
+            C_i = C_ssm[:, i, :]  # (B, d_state)
+            x_i = x_activated[:, i, :]  # (B, d_inner)
 
-        # Compute outputs using vectorized einsum
-        # y: (B, L, d_inner)
-        y = torch.einsum("bisl,bls->bli", state, C_ssm)
+            dA_i = torch.exp(torch.einsum("bi,in->bin", dt_i, A))
+            dB_i = torch.einsum(
+                "bi,bis->bis", dt_i, B_i.unsqueeze(1).expand(-1, self.d_inner, -1)
+            )  # Tentative based on step logic
+            ssm_state = ssm_state * dA_i + dB_i * x_i.unsqueeze(
+                -1
+            )  # (B, d_inner, d_state)
+            C_i_eff = C_ssm[:, i, :]  # (B, d_state)
+            y_i = torch.einsum(
+                "bin,bn->bi", ssm_state, C_i
+            )  # Matches structure if C is shared across d_inner
+
+            ys.append(y_i)
+        y = torch.stack(ys, dim=1)
 
         # Add D skip connection y = y + D * x
         # x_activated is (B, L, D_in)

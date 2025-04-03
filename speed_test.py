@@ -7,13 +7,13 @@ from main_test_lib import Mamba_pt
 # torch._dynamo.config.suppress_errors = True
 
 d_model = 128  # Example dimension
-device = "cpu"
+device = "mps"
 model_pt = Mamba_pt(d_model=d_model).to(device)  # Instantiate your PyTorch Mamba
-dummy_input = torch.randn(16, 200, d_model).to(device)  # (B, L, D)
+dummy_input = torch.randn(64, 200, d_model).to(device)  # (B, L, D)
 
 
 # %%
-# Subsequent runs should be faster
+print(f"Running on device: {device}")
 print("Running without torch.compile...")
 torch.mps.synchronize()
 start_time = time.time()
