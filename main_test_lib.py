@@ -185,87 +185,37 @@ class Mamba_pt(nn.Module):
         # (d_inner, d_state)
         A = -torch.exp(self.A_log.float())
 
-        # Initialize SSM state (hidden state h)
-        # (B, D_in, d_state)
-        ssm_state = torch.zeros(
-            B, self.d_inner, self.d_state, device=hidden_states.device
+        # Precompute all dA and dB for all timesteps
+        # dA: (B, L, d_inner, d_state)
+        dA = torch.exp(
+            torch.einsum("bli,in->blin", dt, A)
+        )  # Expands A for each batch and timestep
+
+        # dB: (B, L, d_inner, d_state)
+        # Expand B_ssm to match dimensions and multiply by dt
+        dB = dt.unsqueeze(-1) * B_ssm.unsqueeze(2)  # (B, L, d_inner, d_state)
+
+        # x_activated: (B, L, d_inner) -> (B, L, d_inner, 1)
+        x = x_activated.unsqueeze(-1)
+
+        # Initialize state tensor with an extra timestep dimension
+        # (B, d_inner, d_state, L+1)
+        state = torch.zeros(
+            B, self.d_inner, self.d_state, L + 1, device=hidden_states.device
         )
-        ys = []
 
-        # Iterate over sequence length L (Recurrence)
-        # This loop is the core difference and the source of inefficiency
+        # Vectorized recurrence using cumulative product
         for i in range(L):
-            # Get parameters for this timestep
-            dt_i = dt[:, i, :]  # (B, d_inner)
-            B_i = B_ssm[:, i, :]  # (B, d_state)
-            C_i = C_ssm[:, i, :]  # (B, d_state)
-            x_i = x_activated[:, i, :]  # (B, d_inner)
+            state[..., i + 1] = dA[:, i] * state[..., i] + dB[:, i] * x[:, i]
 
-            # Discretize A and B
-            # A_bar = exp(dt * A)
-            # dA_i: (B, d_inner, d_state)
-            dA_i = torch.exp(torch.einsum("bi,in->bin", dt_i, A))
-            # dB_i = dt * B
-            # dB_i: (B, d_inner, d_state) - Requires B to be shaped correctly for broadcast/einsum
-            # We need elementwise product of dt_i (B, d_inner) and B_i (B, d_state) broadcasted? No.
-            # dB = dt * B (according to paper's discretization)
-            # Need to multiply dt_i (B, d_inner) with B_i (B, d_state) elementwise after expansion?
-            # Let's follow the logic from original step fn more closely: dB = einsum("bd,bn->bdn", dt, B)
-            # But B here is input-dependent B_ssm.
-            # dB_i = torch.einsum('bi,bn->bin', dt_i, B_i) # This seems wrong dim for B_i
+        # Slice to get final states (B, d_inner, d_state, L)
+        state = state[..., 1:]
 
-            # Looking at the original Mamba forward pass structure (non-fused):
-            # B comes from x_proj, reshaped to (B, L, d_state)
-            # dt comes from dt_proj, reshaped to (B, L, d_inner)
-            # Need dB = (dt * B) where B relates to ssm input x.
-            # The equation h_t = A_bar * h_{t-1} + B_bar * x_t requires B_bar = (dA - I) * A^{-1} * B approx dt * B
-            # Let's use the simplified discretization B_bar approx dt * B
-            # dB_i needs shape (B, d_inner, d_state)
-            # x_i needs shape (B, d_inner)
-            # Original step: dB = torch.einsum("bd,bn->bdn", dt, B) - Here B is d_state vector per d_inner
-            dB_i = torch.einsum(
-                "bi,bis->bis", dt_i, B_i.unsqueeze(1).expand(-1, self.d_inner, -1)
-            )  # Tentative based on step logic
-
-            # Update SSM state: h_t = dA * h_{t-1} + dB * x_t
-            # x_t shape is (B, d_inner), need to unsqueeze for matmul with dB?
-            # Original step: ssm_state.copy_(ssm_state * dA + rearrange(x, "b d -> b d 1") * dB)
-            # So, x needs to be (B, d_inner, 1)
-            ssm_state = ssm_state * dA_i + dB_i * x_i.unsqueeze(
-                -1
-            )  # (B, d_inner, d_state)
-
-            # Calculate output: y_t = C * h_t
-            # C_i is (B, d_state). Need C per d_inner? Yes, C_ssm is (B, L, d_state)
-            # Original step: y = torch.einsum("bdn,bn->bd", ssm_state.to(dtype), C) - C is d_state per d_inner
-            C_i_eff = C_ssm[:, i, :]  # (B, d_state)
-            # y_i needs shape (B, d_inner)
-            # Need C_i (B, d_inner, d_state) ?
-            # Let's assume C_ssm was meant to be (B, L, d_inner, d_state) ? No, (B,L,d_state) seems right from split.
-            # If y = C*h, where h is (B, D_in, d_state), then C must be (B, D_in, d_state) -> (B, D_in) ?
-            # Original selective_scan C is (B, d_state, L) -> C_i is (B, d_state)
-            # Original step C is (B, d_state)
-            # torch.einsum("bdn,bn->bd", ssm_state, C_i) fails dimension check
-            # Let's re-read S4/S6/Mamba... Output y = C h(t)
-            # If h is (B, d_inner, d_state), C should be (B, d_inner, d_state) to map state back to d_inner.
-            # Assume C_ssm from x_proj gives (B, L, d_state) and this needs transforming?
-            # Or maybe the einsum in the original step is ('bdn,bdn->bd') if C is structured differently?
-            # Let's assume C_pre (B*L, d_state) should be reshaped to (B, L, d_state) and somehow used.
-
-            # Revisit Mamba paper/code: C is input-dependent, typically projected from x like B.
-            # The selective_scan_fn expects C of shape (B, d_state, L) or similar.
-            # The implementation here got C_ssm as (B, L, d_state). Let's assume this is correct.
-            # How to combine (B, d_inner, d_state) state with (B, d_state) C to get (B, d_inner) y?
-            # Perhaps y_i = torch.einsum('bis,bs->bi', ssm_state, C_i) ? This works dimensionally.
-            y_i = torch.einsum(
-                "bin,bn->bi", ssm_state, C_i
-            )  # Matches structure if C is shared across d_inner
-
-            ys.append(y_i)
-
-        # Stack outputs from loop
-        # (L, B, D_in) -> (B, L, D_in)
-        y = torch.stack(ys, dim=1)
+        # Compute outputs using vectorized einsum
+        # C_ssm: (B, L, d_state) -> (B, L, 1, d_state)
+        C = C_ssm.unsqueeze(2)
+        # y: (B, L, d_inner)
+        y = torch.einsum("binl,biln->bli", state, C).squeeze(-1)
 
         # Add D skip connection y = y + D * x
         # x_activated is (B, L, D_in)
