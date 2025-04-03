@@ -187,13 +187,10 @@ class Mamba_pt(nn.Module):
 
         # Precompute all dA and dB for all timesteps
         # dA: (B, L, d_inner, d_state)
-        dA = torch.exp(
-            torch.einsum("bli,in->blin", dt, A)
-        )  # Expands A for each batch and timestep
+        dA = torch.exp(torch.einsum("bli,in->blin", dt, A))
 
-        # dB: (B, L, d_inner, d_state)
-        # Expand B_ssm to match dimensions and multiply by dt
-        dB = dt.unsqueeze(-1) * B_ssm.unsqueeze(2)  # (B, L, d_inner, d_state)
+        # Corrected dB: (B, L, d_inner, d_state)
+        dB = torch.einsum("bli,bls->blis", dt, B_ssm)
 
         # x_activated: (B, L, d_inner) -> (B, L, d_inner, 1)
         x = x_activated.unsqueeze(-1)
@@ -212,10 +209,8 @@ class Mamba_pt(nn.Module):
         state = state[..., 1:]
 
         # Compute outputs using vectorized einsum
-        # C_ssm: (B, L, d_state) -> (B, L, 1, d_state)
-        C = C_ssm.unsqueeze(2)
         # y: (B, L, d_inner)
-        y = torch.einsum("binl,biln->bli", state, C).squeeze(-1)
+        y = torch.einsum("bisl,bls->bli", state, C_ssm)
 
         # Add D skip connection y = y + D * x
         # x_activated is (B, L, D_in)
