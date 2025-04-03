@@ -298,7 +298,7 @@ class MambaTab(torch.nn.Module):
         self.relu = torch.nn.ReLU()
         self.layer_norm = torch.nn.LayerNorm(intermediate_representation)
 
-        self.mamba = Mamba(
+        self.mamba = Mamba_pt(
             d_model=intermediate_representation, d_state=32, d_conv=4, expand=2
         )  # Please use different parameters settings for different configurations
         self.output_layer = torch.nn.Linear(intermediate_representation, n_class)
