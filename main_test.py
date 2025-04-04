@@ -1,3 +1,4 @@
+# %%
 from main_test_lib import (
     read_data,
     create_dataloaders,
@@ -31,6 +32,7 @@ x_train, x_test, y_train, y_test = train_test_split(
     stratify=y_data,
     shuffle=True,
 )
+# %%
 val_size = int(len(y_data) * 0.1)
 x_train, x_val, y_train, y_val = train_test_split(
     x_train,
@@ -58,7 +60,9 @@ dataloader = create_dataloaders(
 
 # Get the model
 model = MambaTab(
-    input_features=x_train.shape[1], n_class=1
+    input_features=x_train.shape[1],
+    n_class=1,
+    intermediate_representation=config["REPRESENTATION_LAYER"],
 )  # n_class=1 is to use a single output logit strategy, where n_class does not refer to the number of classes and is sufficient for binary classification
 model = model.to(config["device"])
 
@@ -74,3 +78,5 @@ model = train_model(model, config, dataloader)
 # Get test set performance
 test_result(model, dataloader, config)
 print("----------------Complete----------------")
+
+# %%
