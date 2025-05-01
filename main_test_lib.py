@@ -328,9 +328,9 @@ def test_result(model, dataloader, config):
 
     for inputs, labels in dataloader["test"]:
         inputs = inputs.unsqueeze(0)
-        inputs = inputs.type(torch.FloatTensor)
+        inputs = inputs.type(torch.float32)
         inputs = inputs.to(config["device"])
-
+        labels = labels.type(torch.float32)
         labels = labels.to(config["device"])
         with torch.set_grad_enabled(False):
             outputs = model(inputs)
@@ -483,7 +483,7 @@ def train_model(model, config, dataloader):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config["LR"])
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=config["EPOCH"], eta_min=0, verbose=False
+        optimizer, T_max=config["EPOCH"], eta_min=0
     )
     loss_fn = torch.nn.BCEWithLogitsLoss()
 
@@ -502,10 +502,9 @@ def train_model(model, config, dataloader):
                 inputs = feed_dict[0]
                 inputs = inputs.unsqueeze(0)
                 labels = feed_dict[1]
-
-                inputs = inputs.type(torch.FloatTensor)
+                inputs = inputs.type(torch.float32)
                 inputs = inputs.to(config["device"])
-                labels = labels.type(torch.FloatTensor)
+                labels = labels.type(torch.float32)
                 labels = labels.to(config["device"])
 
                 optimizer.zero_grad()
@@ -562,7 +561,7 @@ def train_ssl(model, config, dataloader):
             for btch, feed_dict in enumerate(dataloader[phase]):
                 inputs = feed_dict[0]
 
-                inputs = inputs.type(torch.FloatTensor)
+                inputs = inputs.type(torch.float32)
                 num_elements = int(torch.prod(torch.tensor(inputs.shape)))
                 # Determine the number of zeros and ones
                 num_zeros = int(num_elements * config["ssl_corruption"])

@@ -13,15 +13,21 @@ import torch
 config = {
     "DATASET_NAME": "credit_approval",  # Please follow paper and use 'X' as dataset name, where X can be ='credit','dress', etc. As an example here X='credit_approval' is provided.
     "SEED": 15,  # variations in machine configurations can affect distributions
-    "BATCH": 100,
+    "BATCH": 1024,
     "LR": 0.0001,
     "EPOCH": 1000,
     "REPRESENTATION_LAYER": 32,
     "ssl_epochs": 100,
     "ssl_corruption": 0.5,
     "ssl": False,
-    "device": "cuda" if torch.cuda.is_available() else "cpu",
+    "device": (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available() else "cpu"
+    ),
 }
+# config["device"] = "cpu"
+print("running on", config["device"])
 # Dataloading and split
 x_data, y_data = read_data(dataset_name=config["DATASET_NAME"])
 x_train, x_test, y_train, y_test = train_test_split(
