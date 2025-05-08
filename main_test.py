@@ -20,13 +20,8 @@ config = {
     "ssl_epochs": 100,
     "ssl_corruption": 0.5,
     "ssl": False,
-    "device": (
-        "cuda"
-        if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available() else "cpu"
-    ),
+    "device": ("cuda" if torch.cuda.is_available() else "cpu"),
 }
-# config["device"] = "cpu"
 print("running on", config["device"])
 # Dataloading and split
 x_data, y_data = read_data(dataset_name=config["DATASET_NAME"])

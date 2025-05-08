@@ -299,7 +299,8 @@ def read_data(dataset_name):
 
     # fill nulll values
     for col in data.columns:
-        data[col].fillna(data[col].mode()[0], inplace=True)
+        # data[col].fillna(data[col].mode()[0], inplace=True)
+        data[col] = data[col].fillna(data[col].mode()[0])
 
     # categorical encoder
     for c in data.columns:
