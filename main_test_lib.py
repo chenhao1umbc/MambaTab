@@ -114,7 +114,7 @@ class Mamba_pt(nn.Module):
             self.d_inner, self.d_model, bias=bias, **factory_kwargs
         )
 
-    def forward(self, hidden_states, inference_params=None):
+    def forward_sequential(self, hidden_states, inference_params=None):
         """
         hidden_states: (B, L, D) -> (Batch, Length, Dim)
         Returns: same shape as hidden_states
@@ -225,6 +225,59 @@ class Mamba_pt(nn.Module):
         output = self.out_proj(output)
 
         return output
+
+    def forward_parallel(self, hidden_states, inference_params=None):
+        """
+        hidden_states: (B, L, D) -> (Batch, Length, Dim)
+        Returns: same shape as hidden_states
+        """
+        B, L, D = hidden_states.shape
+        conv_state, ssm_state = None, None
+        xz = self.in_proj(hidden_states)
+        x, z = xz.chunk(2, dim=-1)
+        x = x.permute(0, 2, 1)
+        x_conv = self.conv1d(x)
+
+        x_conv = x_conv[:, :, :L]
+        x_activated = self.act(x_conv)
+        x_activated = x_activated.permute(0, 2, 1)
+        x_flat = x_activated.reshape(B * L, self.d_inner)
+        x_proj = self.x_proj(x_flat)
+        dt_pre, B_pre, C_pre = torch.split(
+            x_proj, [self.dt_rank, self.d_state, self.d_state], dim=-1
+        )
+        dt_t = dt_pre.t()
+        dt_unbiased = self.dt_proj.weight @ dt_t
+        dt_biased = dt_unbiased.t().reshape(
+            B, L, self.d_inner
+        ) + self.dt_proj.bias.view(1, 1, -1)
+        dt = F.softplus(dt_biased)
+        B_ssm = B_pre.reshape(B, L, self.d_state)
+        C_ssm = C_pre.reshape(B, L, self.d_state)
+        A = -torch.exp(self.A_log.float())
+        dA = torch.exp(torch.einsum("bld,ds->blds", dt, A))
+        dB = torch.einsum("bld,bls->blds", dt, B_ssm)
+        ssm_state = torch.zeros(
+            B, self.d_inner, self.d_state, device=hidden_states.device
+        )
+        ys = []
+
+        for i in range(L):
+            ssm_state = ssm_state * dA[:, i] + dB[:, i] * x_activated[:, i].unsqueeze(
+                -1
+            )
+            y_i = torch.einsum("bds,bs->bd", ssm_state, C_ssm[:, i])
+            ys.append(y_i)
+
+        y = torch.stack(ys, dim=1)
+        y = y + x_activated * self.D.view(1, 1, -1)
+        output = y * self.act(z)
+        output = self.out_proj(output)
+
+        return output
+
+    def forward(self, hidden_states, inference_params=None):
+        return self.forward_parallel(hidden_states, inference_params)
 
 
 class MambaTab(torch.nn.Module):
